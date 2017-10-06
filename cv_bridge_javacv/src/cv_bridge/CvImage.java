@@ -1,23 +1,23 @@
 package cv_bridge;
 
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufOutputStream;
+import io.netty.buffer.Unpooled;
 import org.bytedeco.javacpp.BytePointer;
 import org.bytedeco.javacpp.opencv_core;
 import org.bytedeco.javacpp.opencv_core.Mat;
 import org.bytedeco.javacpp.opencv_imgcodecs;
 import org.bytedeco.javacpp.opencv_imgproc;
-import org.jboss.netty.buffer.ChannelBuffer;
-import org.jboss.netty.buffer.ChannelBufferOutputStream;
-import org.ros.internal.message.MessageBuffers;
+import org.ros.internal.message.ByteBufs;
+import sensor_msgs.CompressedImage;
+import sensor_msgs.Image;
+import sensor_msgs.ImageEncodings;
+import std_msgs.Header;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Vector;
-
-import sensor_msgs.CompressedImage;
-import sensor_msgs.Image;
-import sensor_msgs.ImageEncodings;
-import std_msgs.Header;
 
 /**
  *
@@ -59,18 +59,11 @@ public class CvImage
         ros_image.setWidth(image.cols());
         ros_image.setHeight(image.rows());
         ros_image.setStep(image.arrayStep());
-        //// TODO: Handle the indian if needed;
+        //// TODO: Handle the endian if needed;
         //// ros_image.setIsBigendian();
 
-        ChannelBufferOutputStream stream = new ChannelBufferOutputStream(MessageBuffers.dynamicBuffer());
-        byte[] imageInBytes = new byte[image.arraySize()];
-        ((ByteBuffer)image.createBuffer()).get(imageInBytes);
-        stream.write(imageInBytes);
+        ros_image.setData(Unpooled.wrappedBuffer(image.<ByteBuffer>createBuffer()));
 
-        //noinspection UnusedAssignment
-        imageInBytes = null;
-
-        ros_image.setData(stream.buffer().copy());
         return ros_image;
     }
 
@@ -97,7 +90,7 @@ public class CvImage
         opencv_imgcodecs.imencode(Format.getExtension(dst_format), image, buf);
 
 
-        ChannelBufferOutputStream stream = new ChannelBufferOutputStream(MessageBuffers.dynamicBuffer());
+        ByteBufOutputStream stream = new ByteBufOutputStream(ByteBufs.dynamicBuffer());
         //from https://github.com/bytedeco/javacpp-presets/issues/29#issuecomment-6408082977
         byte[] outputBuffer = new byte[(int)buf.capacity()];
         buf.get(outputBuffer);
@@ -195,19 +188,15 @@ public class CvImage
     }
 
     static protected Mat matFromImage(final Image source) throws Exception {
-        byte[] imageInBytes = source.getData().array();
-        imageInBytes = Arrays.copyOfRange(imageInBytes,source.getData().arrayOffset(),imageInBytes.length);
         String encoding = source.getEncoding().toUpperCase();
         Mat cvImage = new Mat(source.getHeight(),source.getWidth(), ImEncoding.getCvType(encoding));
-
-        BytePointer bytePointer = new BytePointer(imageInBytes);
-        cvImage = cvImage.data(bytePointer);
+        cvImage.<ByteBuffer>createBuffer().put(source.getData().nioBuffer());
         return cvImage;
     }
 
-    static protected Mat matFromImage(final CompressedImage source) throws Exception
-    {
-        ChannelBuffer data = source.getData();
+    static protected Mat matFromImage(final CompressedImage source) throws Exception {
+        // TODO: might need a netty 4 fix as well
+        ByteBuf data = source.getData();
         byte[] imageInBytes = data.array();
         imageInBytes = Arrays.copyOfRange(imageInBytes, source.getData().arrayOffset(), imageInBytes.length);
         //from http://stackoverflow.com/questions/23202130/android-convert-byte-array-from-camera-api-to-color-mat-object-opencv
